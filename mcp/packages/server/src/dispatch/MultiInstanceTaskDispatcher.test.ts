@@ -369,3 +369,21 @@ test("disconnecting the last tab removes its session claim subscription", async 
     await owner.disconnect(connection);
     assert.equal(network.claims.get("alice")?.size, 0);
 });
+
+test("a task forwarded to the owning instance keeps the file it was routed to", async () => {
+    const network = new RedisNetwork();
+    const owner = new Instance(network);
+    const requester = new Instance(network);
+    await owner.connect("alice", "selected");
+    const forwarded: (string | undefined)[] = [];
+    const sendLocalTask = owner.sendLocalTask.bind(owner);
+    owner.sendLocalTask = (task, connection) => {
+        forwarded.push(task.expectedFileId);
+        sendLocalTask(task, connection);
+    };
+    const task = new PluginTask("test", {});
+    task.expectedFileId = "same-file";
+    await requester.dispatcher.dispatch(task, "alice", "selected");
+    await task.getResultPromise();
+    assert.deepEqual(forwarded, ["same-file"]);
+});

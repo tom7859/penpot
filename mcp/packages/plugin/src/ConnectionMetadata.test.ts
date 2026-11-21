@@ -492,3 +492,55 @@ test("plugin refuses a task routed to a file its tab no longer has open and read
     // a task not routed by file runs as before
     assert.equal((await run()).data, "ran");
 });
+
+test("code execution checks the routed file again after waiting for the layout", async () => {
+    const quiet = { log() {}, error() {}, warn() {}, info() {} };
+    const sent: any[] = [];
+    const penpot: any = {
+        currentFile: { id: "file-a" },
+        flags: {},
+        ui: { sendMessage: (message: any) => sent.push(message.response) },
+        // another agent opens a different file in this tab while the handler waits
+        waitForLayoutUpdate: async () => {
+            penpot.currentFile = { id: "file-b" };
+        },
+    };
+    const taskModule: any = {};
+    runInNewContext(compile("TaskHandler.ts"), { exports: taskModule, penpot, console: quiet });
+    const handlerModule: any = {};
+    runInNewContext(compile("task-handlers/ExecuteCodeTaskHandler.ts"), {
+        exports: handlerModule,
+        penpot,
+        console: quiet,
+        require: (name: string) => {
+            if (name === "../TaskHandler") return taskModule;
+            if (name === "../PenpotUtils.ts") return { PenpotUtils: {} };
+            if (name === "../ExecuteCodeTaskConsole.ts")
+                return {
+                    ExecuteCodeTaskConsole: class {
+                        resetLog() {}
+                        getLog() {
+                            return "";
+                        }
+                    },
+                };
+            throw new Error(`Unexpected import: ${name}`);
+        },
+    });
+    const handler = new handlerModule.ExecuteCodeTaskHandler();
+    const run = async () => {
+        const task = new taskModule.Task("task-1", "executeCode", { code: "penpot.ran = true;" });
+        task.targetRefusal = () => (penpot.currentFile.id === "file-a" ? null : "Task refused: file switched");
+        await handler.handle(task);
+        return sent.pop();
+    };
+
+    const refused = await run();
+    assert.equal(refused.success, false);
+    assert.equal(refused.error, "Task refused: file switched");
+    assert.equal(penpot.ran, undefined);
+    penpot.currentFile = { id: "file-a" };
+    penpot.waitForLayoutUpdate = async () => {};
+    assert.equal((await run()).success, true);
+    assert.equal(penpot.ran, true);
+});

@@ -7,6 +7,12 @@ export class Task<TParams = any> {
     public isResponseSent: boolean = false;
 
     /**
+     * Explains why this tab cannot run the task, or returns null if it can; set by the plugin
+     * for a task routed to a file, which must still be open and ready when the task acts.
+     */
+    public targetRefusal: () => string | null = () => null;
+
+    /**
      * @param requestId Unique identifier for the task request
      * @param taskType The type of the task to execute
      * @param params Task parameters/arguments

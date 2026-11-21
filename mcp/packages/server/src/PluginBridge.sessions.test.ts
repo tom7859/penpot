@@ -34,7 +34,13 @@ afterEach(async () => {
     await bridge.close();
 });
 
-async function connect(sessionId: string, token = "alice", fileName = "Design", reply = sessionId, fileId = "file-1") {
+async function connect(
+    sessionId: string,
+    token = "alice",
+    fileName = "Design",
+    reply = sessionId,
+    fileId: string | null = "file-1"
+) {
     const socket = new WebSocket(`ws://127.0.0.1:${port}?userToken=${token}`);
     sockets.push(socket);
     await once(socket, "open");
@@ -343,4 +349,10 @@ test("a task routed by file carries the file's ID for the plugin to check", asyn
         tasks.map((request) => request.expectedFileId),
         ["file-a", undefined]
     );
+});
+
+test("a file argument never matches a ready tab without a file ID", async () => {
+    await connect("tab-1", "alice", "Design", "tab-1", null);
+    await assert.rejects(run(undefined, "Design"), /No connected Penpot session has file "Design" open and ready/);
+    await assert.rejects(run("tab-1", "Design"), /"tab-1" does not have file "Design" open and ready/);
 });

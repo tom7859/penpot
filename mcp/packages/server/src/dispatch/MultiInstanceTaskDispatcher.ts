@@ -193,6 +193,7 @@ export class MultiInstanceTaskDispatcher extends TaskDispatcher {
     private dispatchForwardedTask(connection: PenpotConnection, request: PluginTaskRequest): void {
         // The response is published on the channel keyed by the original request ID.
         const task = new RemotePluginTask(request.task, request.params, this.redisBridge, request.id);
+        task.expectedFileId = request.expectedFileId;
         this.logger.debug("Dispatching remote task %s as %s to Penpot via WebSocket", request.id, task.id);
 
         try {

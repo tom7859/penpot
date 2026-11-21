@@ -188,9 +188,13 @@ async function handlePluginTaskRequest(request: {
 }): Promise<void> {
     console.log("Executing plugin task:", request.task, request.params);
     const task = new Task(request.id, request.task, request.params, rollbackLog);
+    const expectedFileId = request.expectedFileId;
+    if (expectedFileId !== undefined) {
+        task.targetRefusal = () => fileMismatch(expectedFileId);
+    }
 
     // the tab may have switched files since the server routed the task here by file
-    const refusal = request.expectedFileId === undefined ? null : fileMismatch(request.expectedFileId);
+    const refusal = task.targetRefusal();
     if (refusal) {
         task.sendError(refusal);
         return;

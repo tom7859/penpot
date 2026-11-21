@@ -41,7 +41,9 @@ export abstract class TaskDispatcher {
             return sessionId ?? this.selectOnlySession(await this.discoverSessions(userToken));
         }
         const sessions = await this.discoverSessions(userToken);
-        const ready = sessions.filter((session) => session.workspaceState === "ready");
+        const ready = sessions.filter(
+            (session): session is OpenSession => session.workspaceState === "ready" && session.fileId !== null
+        );
         const lowerCaseFile = file.toLowerCase();
         const matchers = [
             (session: PenpotSession) => session.fileId === file,
@@ -49,7 +51,7 @@ export abstract class TaskDispatcher {
             (session: PenpotSession) => session.fileName?.toLowerCase() === lowerCaseFile,
         ];
         const matches = matchers.map((matcher) => ready.filter(matcher)).find((found) => found.length) ?? [];
-        let target: PenpotSession | undefined;
+        let target: OpenSession | undefined;
         if (sessionId !== undefined) {
             if (!sessions.some((session) => session.sessionId === sessionId)) {
                 throw new Error(
@@ -77,7 +79,7 @@ export abstract class TaskDispatcher {
                     `then retry with its sessionId:\n${describeSessions(matches)}`
             );
         }
-        task.expectedFileId = target.fileId ?? undefined;
+        task.expectedFileId = target.fileId;
         return target.sessionId;
     }
 
@@ -96,6 +98,9 @@ export abstract class TaskDispatcher {
         return sessions[0].sessionId;
     }
 }
+
+/** A session with a file open. */
+type OpenSession = PenpotSession & { fileId: string };
 
 /** Lists sessions one per line, with the file each has open. */
 function describeSessions(sessions: PenpotSession[]): string {
