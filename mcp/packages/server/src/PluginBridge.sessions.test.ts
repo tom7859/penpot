@@ -5,6 +5,7 @@ import { WebSocket } from "ws";
 import { HEARTBEAT_REQUEST_INTERVAL_MS, PluginBridge } from "./PluginBridge";
 import { PluginTask } from "./PluginTask";
 import type { PenpotMcpServer } from "./PenpotMcpServer";
+import { ListConnectionsTool } from "./tools/ListConnectionsTool";
 
 let bridge: PluginBridge;
 let port = 17_600;
@@ -33,7 +34,13 @@ afterEach(async () => {
     await bridge.close();
 });
 
-async function connect(sessionId: string, token = "alice", fileName = "Design", reply = sessionId) {
+async function connect(
+    sessionId: string,
+    token = "alice",
+    fileName = "Design",
+    reply = sessionId,
+    fileId: string | null = "file-1"
+) {
     const socket = new WebSocket(`ws://127.0.0.1:${port}?userToken=${token}`);
     sockets.push(socket);
     await once(socket, "open");
@@ -45,7 +52,9 @@ async function connect(sessionId: string, token = "alice", fileName = "Design", 
         }
     });
     const initialized = once(socket, "message", { signal: AbortSignal.timeout(1500) });
-    socket.send(JSON.stringify({ type: "initialize", session: { sessionId, fileId: "file-1", fileName } }));
+    socket.send(
+        JSON.stringify({ type: "initialize", session: { sessionId, fileId, fileName, workspaceState: "ready" } })
+    );
     const [message] = await initialized;
     assert.equal(JSON.parse(message.toString()).type, "initialized");
     return socket;
@@ -182,7 +191,8 @@ test("a dashboard session remains routable while its workspace metadata changes"
     ]) {
         socket.send(JSON.stringify({ type: "context-update", context }));
         assert.equal((await bridge.executePluginTask(new PluginTask("test", {}), "tab")).data, "ok");
-        assert.deepEqual(bridge.getUserConnections("alice")!.getSessions(), [{ sessionId: "tab", ...context }]);
+        const [session] = bridge.getUserConnections("alice")!.getSessions();
+        assert.deepEqual(session, { sessionId: "tab", ...context, connectedAt: session.connectedAt });
     }
 });
 
@@ -202,4 +212,147 @@ test("a task fails at once when its plugin connection closes before answering", 
     );
     // well within the 1s task timeout of these tests
     assert.ok(Date.now() - started < 500);
+});
+
+/** Connects two tabs with different files, as `connect` would for each. */
+async function connectTwoFiles() {
+    await connect("tab-1", "alice", "Components", "tab-1", "file-a");
+    await connect("tab-2", "alice", "Screens", "tab-2", "file-b");
+}
+
+function run(sessionId?: string, file?: string) {
+    return bridge.executePluginTask(new PluginTask("test", {}), sessionId, file);
+}
+
+test("a file argument selects the session by file ID", async () => {
+    await connectTwoFiles();
+    assert.equal((await run(undefined, "file-b")).data, "tab-2");
+});
+
+test("a file argument selects the session by exact file name", async () => {
+    await connectTwoFiles();
+    assert.equal((await run(undefined, "Components")).data, "tab-1");
+});
+
+test("a file argument falls back to a case-insensitive file name", async () => {
+    await connectTwoFiles();
+    assert.equal((await run(undefined, "screens")).data, "tab-2");
+});
+
+test("an exact file name match wins over a case-insensitive one", async () => {
+    await connect("tab-1", "alice", "design", "tab-1", "file-a");
+    await connect("tab-2", "alice", "Design", "tab-2", "file-b");
+    assert.equal((await run(undefined, "Design")).data, "tab-2");
+    // a session ID cannot pick a weaker match than the first tier that has one
+    await assert.rejects(run("tab-1", "Design"), /"tab-1" does not have file "Design" open/);
+});
+
+test("a file argument and a session ID that agree select that session", async () => {
+    await connectTwoFiles();
+    assert.equal((await run("tab-2", "Screens")).data, "tab-2");
+});
+
+test("a file argument and a session ID that disagree fail", async () => {
+    await connectTwoFiles();
+    await assert.rejects(run("tab-1", "Screens"), (error: Error) => {
+        assert.match(error.message, /"tab-1" does not have file "Screens" open/);
+        assert.match(error.message, /tab-2: "Screens" \(file file-b\)/);
+        return true;
+    });
+});
+
+test("a file argument matching no session lists the connected sessions", async () => {
+    await connectTwoFiles();
+    await assert.rejects(run(undefined, "Missing"), (error: Error) => {
+        assert.match(error.message, /No connected Penpot session has file "Missing" open/);
+        assert.match(error.message, /tab-1: "Components" \(file file-a\)/);
+        assert.match(error.message, /tab-2: "Screens" \(file file-b\)/);
+        return true;
+    });
+});
+
+test("a file open in several sessions asks for a session ID", async () => {
+    await connect("tab-1", "alice", "Design", "tab-1", "file-a");
+    await connect("tab-2", "alice", "Design", "tab-2", "file-a");
+    await connect("tab-3", "alice", "Other", "tab-3", "file-c");
+    await assert.rejects(run(undefined, "Design"), (error: Error) => {
+        assert.match(
+            error.message,
+            /open in several Penpot sessions\. Ask the user to select one, then retry with its sessionId/
+        );
+        assert.match(error.message, /tab-1/);
+        assert.match(error.message, /tab-2/);
+        assert.doesNotMatch(error.message, /tab-3/);
+        return true;
+    });
+    assert.equal((await run("tab-1", "Design")).data, "tab-1");
+});
+
+test("without a file argument the only session is still selected implicitly", async () => {
+    await connect("tab-1", "alice", "Components", "tab-1", "file-a");
+    assert.equal((await run()).data, "tab-1");
+});
+
+test("without a file argument several sessions still require a selection", async () => {
+    await connectTwoFiles();
+    await assert.rejects(run(), /Ask the user/);
+});
+
+test("a file argument follows a session that switches files", async () => {
+    const socket = await connect("tab-1", "alice", "Components", "tab-1", "file-a");
+    socket.send(JSON.stringify({ type: "context-update", context: { fileId: "file-b", fileName: "Screens" } }));
+    // a task round trip on the same socket ensures the server has applied the update
+    await run("tab-1");
+    assert.equal((await run(undefined, "Screens")).data, "tab-1");
+    await assert.rejects(run(undefined, "Components"), /No connected Penpot session has file "Components" open/);
+});
+
+test("list_connections reports each session's file and connection time", async () => {
+    const tool = new ListConnectionsTool({ pluginBridge: bridge } as unknown as PenpotMcpServer);
+    const [empty] = (await tool.execute({})).content as { text: string }[];
+    assert.equal(empty.text, "No Penpot sessions are connected.");
+    await connectTwoFiles();
+    const [response] = (await tool.execute({})).content as { text: string }[];
+    const sessions = JSON.parse(response.text);
+    assert.deepEqual(
+        sessions.map(({ sessionId, fileId, fileName }: Record<string, string>) => ({ sessionId, fileId, fileName })),
+        [
+            { sessionId: "tab-1", fileId: "file-a", fileName: "Components" },
+            { sessionId: "tab-2", fileId: "file-b", fileName: "Screens" },
+        ]
+    );
+    for (const session of sessions) assert.ok(!Number.isNaN(Date.parse(session.connectedAt)));
+});
+
+test("a file argument with a disconnected session ID says the session is not connected", async () => {
+    await connectTwoFiles();
+    await assert.rejects(run("gone", "Screens"), /Penpot session "gone" is not connected/);
+});
+
+test("a file argument does not match a tab whose workspace is still loading", async () => {
+    const socket = await connect("tab-1", "alice", "Components", "tab-1", "file-a");
+    const context = { fileId: "file-a", fileName: "Components", workspaceState: "loading" };
+    socket.send(JSON.stringify({ type: "context-update", context }));
+    await run("tab-1");
+    await assert.rejects(run(undefined, "Components"), /has file "Components" open and ready.*file file-a, loading/s);
+    await assert.rejects(run("tab-1", "Components"), /"tab-1" does not have file "Components" open and ready/);
+});
+
+test("a task routed by file carries the file's ID for the plugin to check", async () => {
+    const socket = await connect("tab-1", "alice", "Components", "tab-1", "file-a");
+    const requests: { task?: string; expectedFileId?: string }[] = [];
+    socket.on("message", (raw) => requests.push(JSON.parse(raw.toString())));
+    await run(undefined, "components");
+    await run("tab-1");
+    const tasks = requests.filter((request) => request.task);
+    assert.deepEqual(
+        tasks.map((request) => request.expectedFileId),
+        ["file-a", undefined]
+    );
+});
+
+test("a file argument never matches a ready tab without a file ID", async () => {
+    await connect("tab-1", "alice", "Design", "tab-1", null);
+    await assert.rejects(run(undefined, "Design"), /No connected Penpot session has file "Design" open and ready/);
+    await assert.rejects(run("tab-1", "Design"), /"tab-1" does not have file "Design" open and ready/);
 });

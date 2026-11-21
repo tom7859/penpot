@@ -73,6 +73,13 @@ export class ExecuteCodeTaskHandler extends TaskHandler<ExecuteCodeTaskParams> {
                 console.error("Error waiting for layout update:", e);
             }
 
+            // a routed file may have been closed while waiting, so check it again right before running
+            const refusal = task.targetRefusal();
+            if (refusal) {
+                task.sendError(refusal);
+                return;
+            }
+
             // execute the code in an async function with the context variables as parameters
             result = await (async (ctx) => {
                 const fn = new Function(...Object.keys(ctx), `return (async () => { ${code} })();`);

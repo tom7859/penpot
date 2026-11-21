@@ -416,3 +416,131 @@ test("dashboard sessions use the short session ID and publish context changes wi
     }
     assert.equal(ui.sockets.length, 1);
 });
+
+test("plugin refuses a task routed to a file its tab no longer has open and ready", async () => {
+    let onMessage!: (message: any) => void;
+    const messages: any[] = [];
+    let status = "ready";
+    const quiet = { log() {}, error() {}, warn() {}, info() {} };
+    const penpot = {
+        currentFile: { id: "file-b", name: "Screens" },
+        currentUser: { sessionId: "tab-1" },
+        theme: "dark",
+        ui: {
+            open() {},
+            onMessage: (handler: (message: any) => void) => {
+                onMessage = handler;
+            },
+            sendMessage: (message: any) => messages.push(JSON.parse(JSON.stringify(message))),
+        },
+        on() {},
+    };
+    runInNewContext(compile("plugin.ts"), {
+        exports: {},
+        console: quiet,
+        penpot,
+        penpotMgmt: {
+            get workspace() {
+                return { status, fileId: penpot.currentFile.id, fileName: penpot.currentFile.name };
+            },
+            on() {},
+        },
+        mcp: undefined,
+        require: (name: string) => {
+            if (name === "./task-handlers/ExecuteCodeTaskHandler") {
+                class ExecuteCodeTaskHandler {
+                    isApplicableTo() {
+                        return true;
+                    }
+                    async handle(task: any) {
+                        task.sendSuccess("ran");
+                    }
+                }
+                return { ExecuteCodeTaskHandler };
+            }
+            if (name === "./TaskHandler") {
+                const exports = {};
+                runInNewContext(compile("TaskHandler.ts"), { exports, penpot, console: quiet });
+                return exports;
+            }
+            if (name === "./RollbackLog") {
+                class RollbackLog {
+                    listen() {}
+                    pending() {
+                        return [];
+                    }
+                }
+                return { LocalStorageRollbackStore: class {}, RollbackLog };
+            }
+            return pluginRequire(name);
+        },
+    });
+    const run = async (expectedFileId?: string) => {
+        onMessage({ id: "task-1", task: "executeCode", params: {}, expectedFileId });
+        await new Promise((resolve) => setImmediate(resolve));
+        return messages.filter((message) => message.type === "task-response").pop().response;
+    };
+
+    const switched = await run("file-a");
+    assert.equal(switched.success, false);
+    assert.match(switched.error, /^Task refused: this Penpot tab now has file file-b open, not file file-a/);
+    assert.equal((await run("file-b")).data, "ran");
+    status = "loading";
+    const loading = await run("file-b");
+    assert.equal(loading.success, false);
+    assert.match(loading.error, /^Task refused: this Penpot tab's workspace is loading, not ready/);
+    // a task not routed by file runs as before
+    assert.equal((await run()).data, "ran");
+});
+
+test("code execution checks the routed file again after waiting for the layout", async () => {
+    const quiet = { log() {}, error() {}, warn() {}, info() {} };
+    const sent: any[] = [];
+    const penpot: any = {
+        currentFile: { id: "file-a" },
+        flags: {},
+        ui: { sendMessage: (message: any) => sent.push(message.response) },
+        // another agent opens a different file in this tab while the handler waits
+        waitForLayoutUpdate: async () => {
+            penpot.currentFile = { id: "file-b" };
+        },
+    };
+    const taskModule: any = {};
+    runInNewContext(compile("TaskHandler.ts"), { exports: taskModule, penpot, console: quiet });
+    const handlerModule: any = {};
+    runInNewContext(compile("task-handlers/ExecuteCodeTaskHandler.ts"), {
+        exports: handlerModule,
+        penpot,
+        console: quiet,
+        require: (name: string) => {
+            if (name === "../TaskHandler") return taskModule;
+            if (name === "../PenpotUtils.ts") return { PenpotUtils: {} };
+            if (name === "../ExecuteCodeTaskConsole.ts")
+                return {
+                    ExecuteCodeTaskConsole: class {
+                        resetLog() {}
+                        getLog() {
+                            return "";
+                        }
+                    },
+                };
+            throw new Error(`Unexpected import: ${name}`);
+        },
+    });
+    const handler = new handlerModule.ExecuteCodeTaskHandler();
+    const run = async () => {
+        const task = new taskModule.Task("task-1", "executeCode", { code: "penpot.ran = true;" });
+        task.targetRefusal = () => (penpot.currentFile.id === "file-a" ? null : "Task refused: file switched");
+        await handler.handle(task);
+        return sent.pop();
+    };
+
+    const refused = await run();
+    assert.equal(refused.success, false);
+    assert.equal(refused.error, "Task refused: file switched");
+    assert.equal(penpot.ran, undefined);
+    penpot.currentFile = { id: "file-a" };
+    penpot.waitForLayoutUpdate = async () => {};
+    assert.equal((await run()).success, true);
+    assert.equal(penpot.ran, true);
+});

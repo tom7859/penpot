@@ -26,9 +26,14 @@ export class MultiInstanceTaskDispatcher extends TaskDispatcher {
         super();
     }
 
-    async dispatch(task: AbstractPluginTask, userToken: string | null, sessionId?: string): Promise<void> {
+    async dispatch(
+        task: AbstractPluginTask,
+        userToken: string | null,
+        sessionId?: string,
+        file?: string
+    ): Promise<void> {
         const token = this.requireUserToken(userToken);
-        const targetId = sessionId ?? this.selectOnlySession(await this.discoverSessions(token));
+        const targetId = await this.resolveSessionId(task, token, sessionId, file);
         this.host.sendRemoteTask(task, token, targetId);
     }
 
@@ -188,6 +193,7 @@ export class MultiInstanceTaskDispatcher extends TaskDispatcher {
     private dispatchForwardedTask(connection: PenpotConnection, request: PluginTaskRequest): void {
         // The response is published on the channel keyed by the original request ID.
         const task = new RemotePluginTask(request.task, request.params, this.redisBridge, request.id);
+        task.expectedFileId = request.expectedFileId;
         this.logger.debug("Dispatching remote task %s as %s to Penpot via WebSocket", request.id, task.id);
 
         try {

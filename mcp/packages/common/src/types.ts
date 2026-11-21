@@ -4,6 +4,8 @@ export interface PenpotSession {
     fileId: string | null;
     fileName: string | null;
     workspaceState?: "none" | "loading" | "ready";
+    /** when the server registered the connection, as an ISO 8601 timestamp; set by the server. */
+    connectedAt?: string;
 }
 
 /** First message sent by the plugin on each new WebSocket connection. */
@@ -85,6 +87,12 @@ export interface PluginTaskRequest {
      * The parameters for task execution.
      */
     params: any;
+
+    /**
+     * The file the task was routed to, if routed by file; the plugin refuses the task
+     * unless that file is open and ready in its tab.
+     */
+    expectedFileId?: string;
 }
 
 /**

@@ -31,6 +31,7 @@ export class ImportImageArgs {
                 "Optional height for the rectangle. If only height is provided, width is calculated to maintain aspect ratio."
             ),
         sessionId: Tool.SESSION_ID_SCHEMA,
+        file: Tool.FILE_SCHEMA,
     };
 
     filePath!: string;
@@ -44,6 +45,8 @@ export class ImportImageArgs {
     height?: number;
 
     sessionId?: string;
+
+    file?: string;
 }
 
 /**
@@ -119,7 +122,7 @@ export class ImportImageTool extends Tool<ImportImageArgs> {
             return { shapeId: rectangle.id };
             `;
         const task = new ExecuteCodePluginTask({ code: code });
-        const executionResult = await this.mcpServer.pluginBridge.executePluginTask(task, args.sessionId);
+        const executionResult = await this.mcpServer.pluginBridge.executePluginTask(task, args.sessionId, args.file);
 
         return new TextResponse(JSON.stringify(executionResult.data?.result, null, 2));
     }

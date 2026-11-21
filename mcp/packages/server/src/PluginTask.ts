@@ -39,6 +39,12 @@ export abstract class AbstractPluginTask<TParams = any, TResult extends PluginTa
     public readonly params: TParams;
 
     /**
+     * The file the task was routed to, if routed by file; sent so that the plugin can refuse
+     * the task when its tab has switched files since the routing decision.
+     */
+    public expectedFileId?: string;
+
+    /**
      * Creates a new plugin task instance.
      *
      * @param task - The name of the task to execute
@@ -60,6 +66,7 @@ export abstract class AbstractPluginTask<TParams = any, TResult extends PluginTa
             id: this.id,
             task: this.task,
             params: this.params,
+            ...(this.expectedFileId !== undefined ? { expectedFileId: this.expectedFileId } : {}),
         };
     }
 

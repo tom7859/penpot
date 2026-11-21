@@ -12,8 +12,13 @@ export class SingleInstanceTaskDispatcher extends TaskDispatcher {
         return this.host.getUserConnections(userToken)?.getSessions() ?? [];
     }
 
-    async dispatch(task: AbstractPluginTask, userToken: string | null, sessionId?: string): Promise<void> {
-        const targetId = sessionId ?? this.selectOnlySession(await this.discoverSessions(userToken));
+    async dispatch(
+        task: AbstractPluginTask,
+        userToken: string | null,
+        sessionId?: string,
+        file?: string
+    ): Promise<void> {
+        const targetId = await this.resolveSessionId(task, userToken, sessionId, file);
         const connection = this.host.getUserConnections(userToken)?.get(targetId);
         if (!connection) {
             throw new Error(`Penpot session ${JSON.stringify(targetId)} is not connected for this user.`);
