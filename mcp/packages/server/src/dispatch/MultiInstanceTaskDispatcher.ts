@@ -33,7 +33,7 @@ export class MultiInstanceTaskDispatcher extends TaskDispatcher {
         file?: string
     ): Promise<void> {
         const token = this.requireUserToken(userToken);
-        const targetId = await this.resolveSessionId(token, sessionId, file);
+        const targetId = await this.resolveSessionId(task, token, sessionId, file);
         this.host.sendRemoteTask(task, token, targetId);
     }
 

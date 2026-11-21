@@ -46,7 +46,9 @@ async function connect(sessionId: string, token = "alice", fileName = "Design", 
         }
     });
     const initialized = once(socket, "message", { signal: AbortSignal.timeout(1500) });
-    socket.send(JSON.stringify({ type: "initialize", session: { sessionId, fileId, fileName } }));
+    socket.send(
+        JSON.stringify({ type: "initialize", session: { sessionId, fileId, fileName, workspaceState: "ready" } })
+    );
     const [message] = await initialized;
     assert.equal(JSON.parse(message.toString()).type, "initialized");
     return socket;
@@ -235,8 +237,8 @@ test("an exact file name match wins over a case-insensitive one", async () => {
     await connect("tab-1", "alice", "design", "tab-1", "file-a");
     await connect("tab-2", "alice", "Design", "tab-2", "file-b");
     assert.equal((await run(undefined, "Design")).data, "tab-2");
-    // a session ID still selects a tab matched only case-insensitively
-    assert.equal((await run("tab-1", "Design")).data, "tab-1");
+    // a session ID cannot pick a weaker match than the first tier that has one
+    await assert.rejects(run("tab-1", "Design"), /"tab-1" does not have file "Design" open/);
 });
 
 test("a file argument and a session ID that agree select that session", async () => {
@@ -314,4 +316,31 @@ test("list_connections reports each session's file and connection time", async (
         ]
     );
     for (const session of sessions) assert.ok(!Number.isNaN(Date.parse(session.connectedAt)));
+});
+
+test("a file argument with a disconnected session ID says the session is not connected", async () => {
+    await connectTwoFiles();
+    await assert.rejects(run("gone", "Screens"), /Penpot session "gone" is not connected/);
+});
+
+test("a file argument does not match a tab whose workspace is still loading", async () => {
+    const socket = await connect("tab-1", "alice", "Components", "tab-1", "file-a");
+    const context = { fileId: "file-a", fileName: "Components", workspaceState: "loading" };
+    socket.send(JSON.stringify({ type: "context-update", context }));
+    await run("tab-1");
+    await assert.rejects(run(undefined, "Components"), /has file "Components" open and ready.*file file-a, loading/s);
+    await assert.rejects(run("tab-1", "Components"), /"tab-1" does not have file "Components" open and ready/);
+});
+
+test("a task routed by file carries the file's ID for the plugin to check", async () => {
+    const socket = await connect("tab-1", "alice", "Components", "tab-1", "file-a");
+    const requests: { task?: string; expectedFileId?: string }[] = [];
+    socket.on("message", (raw) => requests.push(JSON.parse(raw.toString())));
+    await run(undefined, "components");
+    await run("tab-1");
+    const tasks = requests.filter((request) => request.task);
+    assert.deepEqual(
+        tasks.map((request) => request.expectedFileId),
+        ["file-a", undefined]
+    );
 });

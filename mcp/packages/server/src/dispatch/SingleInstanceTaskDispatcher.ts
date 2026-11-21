@@ -18,7 +18,7 @@ export class SingleInstanceTaskDispatcher extends TaskDispatcher {
         sessionId?: string,
         file?: string
     ): Promise<void> {
-        const targetId = await this.resolveSessionId(userToken, sessionId, file);
+        const targetId = await this.resolveSessionId(task, userToken, sessionId, file);
         const connection = this.host.getUserConnections(userToken)?.get(targetId);
         if (!connection) {
             throw new Error(`Penpot session ${JSON.stringify(targetId)} is not connected for this user.`);

@@ -27,42 +27,58 @@ export abstract class TaskDispatcher {
     /**
      * Resolves the target session, discovering sessions unless a session ID alone decides it.
      *
-     * A file matches by exact file ID, else by exact file name, else by case-insensitive file name;
-     * a session ID given with it must name a session that has the file open.
+     * A file matches a ready tab by exact file ID, else by exact file name, else by case-insensitive
+     * file name, and only the first tier with any match counts; a session ID given with it must be one
+     * of those matches. A task routed by file carries the file's ID for the plugin to check.
      */
-    protected async resolveSessionId(userToken: string | null, sessionId?: string, file?: string): Promise<string> {
+    protected async resolveSessionId(
+        task: AbstractPluginTask,
+        userToken: string | null,
+        sessionId?: string,
+        file?: string
+    ): Promise<string> {
         if (file === undefined) {
             return sessionId ?? this.selectOnlySession(await this.discoverSessions(userToken));
         }
         const sessions = await this.discoverSessions(userToken);
+        const ready = sessions.filter((session) => session.workspaceState === "ready");
         const lowerCaseFile = file.toLowerCase();
         const matchers = [
             (session: PenpotSession) => session.fileId === file,
             (session: PenpotSession) => session.fileName === file,
             (session: PenpotSession) => session.fileName?.toLowerCase() === lowerCaseFile,
         ];
+        const matches = matchers.map((matcher) => ready.filter(matcher)).find((found) => found.length) ?? [];
+        let target: PenpotSession | undefined;
         if (sessionId !== undefined) {
-            const session = sessions.find((candidate) => candidate.sessionId === sessionId);
-            if (session && matchers.some((matcher) => matcher(session))) return sessionId;
+            if (!sessions.some((session) => session.sessionId === sessionId)) {
+                throw new Error(
+                    `Penpot session ${JSON.stringify(sessionId)} is not connected. ` +
+                        `Connected sessions:\n${describeSessions(sessions)}`
+                );
+            }
+            target = matches.find((session) => session.sessionId === sessionId);
+            if (!target) {
+                throw new Error(
+                    `Penpot session ${JSON.stringify(sessionId)} does not have file ${JSON.stringify(file)} open and ready. ` +
+                        `Connected sessions:\n${describeSessions(sessions)}`
+                );
+            }
+        } else if (matches.length === 1) {
+            target = matches[0];
+        } else if (matches.length === 0) {
             throw new Error(
-                `Penpot session ${JSON.stringify(sessionId)} does not have file ${JSON.stringify(file)} open. ` +
+                `No connected Penpot session has file ${JSON.stringify(file)} open and ready. ` +
                     `Connected sessions:\n${describeSessions(sessions)}`
             );
-        }
-        const matches = matchers.map((matcher) => sessions.filter(matcher)).find((found) => found.length) ?? [];
-        if (matches.length === 0) {
-            throw new Error(
-                `No connected Penpot session has file ${JSON.stringify(file)} open. ` +
-                    `Connected sessions:\n${describeSessions(sessions)}`
-            );
-        }
-        if (matches.length > 1) {
+        } else {
             throw new Error(
                 `File ${JSON.stringify(file)} is open in several Penpot sessions. Ask the user to select one, ` +
                     `then retry with its sessionId:\n${describeSessions(matches)}`
             );
         }
-        return matches[0].sessionId;
+        task.expectedFileId = target.fileId ?? undefined;
+        return target.sessionId;
     }
 
     /** Selects the sole session from a complete discovery result. */
@@ -73,7 +89,7 @@ export abstract class TaskDispatcher {
         if (sessions.length !== 1) {
             throw new Error(
                 "Multiple Penpot sessions are connected. Ask the user to select one of the active sessions, " +
-                    "then retry with its sessionId:\n" +
+                    "then retry with its sessionId, or with the file it has open as `file`:\n" +
                     describeSessions(sessions)
             );
         }
@@ -87,7 +103,7 @@ function describeSessions(sessions: PenpotSession[]): string {
     return sessions
         .map(
             (session) =>
-                `${session.sessionId}: ${session.fileId ? `${JSON.stringify(session.fileName)} (file ${session.fileId})` : "no active workspace"}`
+                `${session.sessionId}: ${session.fileId ? `${JSON.stringify(session.fileName)} (file ${session.fileId}${session.workspaceState === "loading" ? ", loading" : ""})` : "no active workspace"}`
         )
         .join("\n");
 }

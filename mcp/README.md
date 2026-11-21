@@ -258,6 +258,8 @@ Target a tab by its file:
 * `execute_code`, `export_shape` and `import_image` also take an optional `file`: a file ID or file name
   (matched exactly, then case-insensitively). The server routes the call to the connected tab that has that file open.
 * If the file is open in several tabs, the server asks for a `sessionId` as well; given both, they must agree.
+* Only a tab whose file has finished loading matches, and the plugin refuses the call if its tab has switched
+  files since it was routed.
 * The `list_connections` tool lists every connected tab's session ID, file ID, file name and connection time.
 
 For integrated remote MCP connection controls and session behavior, see the

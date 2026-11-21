@@ -156,14 +156,45 @@ function sendWorkspaceContext(): void {
 
 management?.on("workspacechange", sendWorkspaceContext);
 
+/** Explains why this tab cannot run a task routed to the given file, or returns null if it can. */
+function fileMismatch(expectedFileId: string): string | null {
+    const workspace = currentWorkspace();
+    if (workspace.status !== "ready") {
+        return (
+            `Task refused: this Penpot tab's workspace is ${workspace.status}, not ready, ` +
+            `so it cannot run a task for file ${expectedFileId}. Retry once the file has loaded.`
+        );
+    }
+    const fileId = penpot.currentFile?.id ?? null;
+    if (fileId !== expectedFileId) {
+        return (
+            `Task refused: this Penpot tab now has file ${fileId} open, not file ${expectedFileId}, ` +
+            `so the task was not run. Call list_connections and retry.`
+        );
+    }
+    return null;
+}
+
 /**
  * Handles plugin task requests received from the MCP server via WebSocket.
  *
  * @param request - The task request containing ID, task type and parameters
  */
-async function handlePluginTaskRequest(request: { id: string; task: string; params: any }): Promise<void> {
+async function handlePluginTaskRequest(request: {
+    id: string;
+    task: string;
+    params: any;
+    expectedFileId?: string;
+}): Promise<void> {
     console.log("Executing plugin task:", request.task, request.params);
     const task = new Task(request.id, request.task, request.params, rollbackLog);
+
+    // the tab may have switched files since the server routed the task here by file
+    const refusal = request.expectedFileId === undefined ? null : fileMismatch(request.expectedFileId);
+    if (refusal) {
+        task.sendError(refusal);
+        return;
+    }
 
     // Find the appropriate handler
     const handler = taskHandlers.find((h) => h.isApplicableTo(task));

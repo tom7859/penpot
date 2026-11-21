@@ -87,6 +87,12 @@ export interface PluginTaskRequest {
      * The parameters for task execution.
      */
     params: any;
+
+    /**
+     * The file the task was routed to, if routed by file; the plugin refuses the task
+     * unless that file is open and ready in its tab.
+     */
+    expectedFileId?: string;
 }
 
 /**
