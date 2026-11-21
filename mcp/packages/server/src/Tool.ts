@@ -31,6 +31,16 @@ export abstract class Tool<TArgs extends object> {
                 "If several sessions are listed in an error, ask the user to select one and pass its sessionId."
         );
 
+    public static readonly FILE_SCHEMA = z
+        .string()
+        .min(1)
+        .max(256)
+        .optional()
+        .describe(
+            "Penpot file to use, by file ID or file name (exact, then case-insensitive); selects the session " +
+                "that has it open (see list_connections). If it is open in several sessions, also pass sessionId."
+        );
+
     private readonly logger = createLogger("Tool");
 
     /** monotonically increasing counter for unique tool execution IDs */

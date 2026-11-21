@@ -4,6 +4,8 @@ export interface PenpotSession {
     fileId: string | null;
     fileName: string | null;
     workspaceState?: "none" | "loading" | "ready";
+    /** when the server registered the connection, as an ISO 8601 timestamp; set by the server. */
+    connectedAt?: string;
 }
 
 /** First message sent by the plugin on each new WebSocket connection. */

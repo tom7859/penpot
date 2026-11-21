@@ -26,9 +26,14 @@ export class MultiInstanceTaskDispatcher extends TaskDispatcher {
         super();
     }
 
-    async dispatch(task: AbstractPluginTask, userToken: string | null, sessionId?: string): Promise<void> {
+    async dispatch(
+        task: AbstractPluginTask,
+        userToken: string | null,
+        sessionId?: string,
+        file?: string
+    ): Promise<void> {
         const token = this.requireUserToken(userToken);
-        const targetId = sessionId ?? this.selectOnlySession(await this.discoverSessions(token));
+        const targetId = await this.resolveSessionId(token, sessionId, file);
         this.host.sendRemoteTask(task, token, targetId);
     }
 

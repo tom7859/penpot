@@ -37,6 +37,7 @@ export class ExportShapeArgs {
                     "the image data is returned directly for you to see."
             ),
         sessionId: Tool.SESSION_ID_SCHEMA,
+        file: Tool.FILE_SCHEMA,
     };
 
     shapeId!: string;
@@ -48,6 +49,8 @@ export class ExportShapeArgs {
     filePath?: string;
 
     sessionId?: string;
+
+    file?: string;
 }
 
 /**
@@ -154,7 +157,7 @@ export class ExportShapeTool extends Tool<ExportShapeArgs> {
 
         // execute the code and obtain the image data
         const task = new ExecuteCodePluginTask({ code: code });
-        const result = await this.mcpServer.pluginBridge.executePluginTask(task, args.sessionId);
+        const result = await this.mcpServer.pluginBridge.executePluginTask(task, args.sessionId, args.file);
         const imageData = result.data!.result;
 
         // handle output and return response

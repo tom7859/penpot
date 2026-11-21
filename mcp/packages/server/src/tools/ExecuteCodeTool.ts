@@ -17,6 +17,7 @@ export class ExecuteCodeArgs {
             .min(1, "Code cannot be empty")
             .describe("The JavaScript code to execute in the plugin context."),
         sessionId: Tool.SESSION_ID_SCHEMA,
+        file: Tool.FILE_SCHEMA,
     };
 
     /**
@@ -25,6 +26,8 @@ export class ExecuteCodeArgs {
     code!: string;
 
     sessionId?: string;
+
+    file?: string;
 }
 
 /**
@@ -70,7 +73,7 @@ export class ExecuteCodeTool extends Tool<ExecuteCodeArgs> {
     protected async executeCore(args: ExecuteCodeArgs): Promise<ToolResponse> {
         const taskParams: ExecuteCodeTaskParams = { code: args.code };
         const task = new ExecuteCodePluginTask(taskParams);
-        const result = await this.mcpServer.pluginBridge.executePluginTask(task, args.sessionId);
+        const result = await this.mcpServer.pluginBridge.executePluginTask(task, args.sessionId, args.file);
 
         if (result.data !== undefined) {
             return new TextResponse(JSON.stringify(result.data, null, 2));

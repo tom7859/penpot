@@ -5,6 +5,7 @@ import { AbstractPluginTask, PluginTask, PluginTaskError } from "./PluginTask";
 import { RollbackNotices } from "./RollbackNotices";
 import {
     ContentRollbackEvent,
+    PenpotSession,
     PluginTaskResponse,
     PluginTaskResult,
     UnclaimedRollbacksMessage,
@@ -248,7 +249,7 @@ export class PluginBridge implements TaskDispatchHost {
             userToken,
             pingInterval,
             heartbeatRequestInterval,
-            session,
+            session: { ...session, connectedAt: new Date().toISOString() },
             ready: false,
             lastHeartbeat: Date.now(),
             frozen: false,
@@ -416,6 +417,21 @@ export class PluginBridge implements TaskDispatchHost {
         return true;
     }
 
+    /** Lists the Penpot sessions connected for the requesting user. */
+    public async listSessions(): Promise<PenpotSession[]> {
+        return this.dispatcher.discoverSessions(this.requestUserToken());
+    }
+
+    /** Returns the requesting user's token in multi-user mode, else null. */
+    private requestUserToken(): string | null {
+        if (!this.mcpServer.isMultiUserMode()) return null;
+        const userToken = this.mcpServer.getSessionContext()?.userToken;
+        if (!userToken) {
+            throw new Error("No userToken found in session context. Multi-user mode requires authentication.");
+        }
+        return userToken;
+    }
+
     getUserConnections(userToken: string | null): UserPenpotConnections | undefined {
         return userToken === null ? this.singleUserConnections : this.userPenpotConnectionsByToken.get(userToken);
     }
@@ -428,23 +444,18 @@ export class PluginBridge implements TaskDispatchHost {
      *
      * @param task - The plugin task to execute
      * @param sessionId - The target session; when omitted, discovery must yield exactly one session
+     * @param file - The ID or name of the file open in the target session; must agree with `sessionId` if both are given
      * @throws Error if no plugin instances are connected or available
      */
     public async executePluginTask<TResult extends PluginTaskResult<any>>(
         task: PluginTask<any, TResult>,
-        sessionId?: string
+        sessionId?: string,
+        file?: string
     ): Promise<TResult> {
-        let userToken: string | null = null;
-        if (this.mcpServer.isMultiUserMode()) {
-            const sessionContext = this.mcpServer.getSessionContext();
-            if (!sessionContext?.userToken) {
-                throw new Error("No userToken found in session context. Multi-user mode requires authentication.");
-            }
-            userToken = sessionContext.userToken;
-        }
+        const userToken = this.requestUserToken();
         // attach the result handler before dispatch can reject the task
         const resultPromise = task.getResultPromise();
-        void this.dispatcher.dispatch(task, userToken, sessionId).catch((error) => {
+        void this.dispatcher.dispatch(task, userToken, sessionId, file).catch((error) => {
             task.rejectWithError(error instanceof Error ? error : new Error(String(error)));
         });
         try {
